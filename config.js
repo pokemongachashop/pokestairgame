@@ -13,7 +13,7 @@ export const CONFIG = {
   storageBucket: "pokestair.firebasestorage.app",
   messagingSenderId: "978944147870",
   appId: "1:978944147870:web:bb6552814038dfec6a568f"
-};
+},
 
   // 관리자 로그인 창에 미리 채워 둘 이메일 (편의용).
   // ⚠ 권한은 이 문자열이 아니라 DB의 stairRace/admins/{UID} = true 로만 결정됩니다.
