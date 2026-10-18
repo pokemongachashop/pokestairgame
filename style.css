@@ -262,3 +262,21 @@ body.is-admin .btn.admin-only[hidden] { display: none !important; }
   .char-grid.small { grid-template-columns: repeat(5, 1fr); }
   .char-grid.small .char-btn canvas { width: 34px; height: 34px; }
 }
+
+/* ---------- 로딩 실패 안내 ---------- */
+.boot-error {
+  position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 100;
+  width: min(440px, calc(100% - 32px)); background: #fff; border-radius: 20px; padding: 20px;
+  box-shadow: var(--shadow); color: var(--ink); font-size: 14px; line-height: 1.5;
+}
+.boot-error b { font-size: 17px; color: var(--red); }
+.boot-error p { margin: 8px 0; }
+.boot-error code { display: block; white-space: pre-wrap; word-break: break-all; background: #f1f4fb; border-radius: 10px; padding: 10px; font-size: 12px; }
+.admin-status .diag { margin-top: 10px; padding: 10px; border-radius: 12px; background: #fff4e5; color: #8a4b00; font-size: 13px; line-height: 1.55; }
+.admin-status .diag small { display: block; margin-top: 4px; color: var(--ink-soft); }
+.admin-status #btn-copy-uid { margin-left: 4px; vertical-align: middle; }
+
+/* ---------- 전원 탈락 종료 연출 / 순위 공개 ---------- */
+#stage.finishing #cv { filter: brightness(.72) saturate(.85); transition: filter .4s; }
+.result-list li.reveal, .winner.reveal { animation: reveal .45s cubic-bezier(.2, .9, .3, 1.25) both; }
+@keyframes reveal { from { opacity: 0; transform: translateY(14px) scale(.96); } to { opacity: 1; transform: none; } }
