@@ -6,18 +6,18 @@
 // =============================================================
 export const CONFIG = {
   firebase: {
-    apiKey: "YOUR_FIREBASE_API_KEY",
-    authDomain: "YOUR_PROJECT.firebaseapp.com",
-    databaseURL: "https://YOUR_PROJECT-default-rtdb.asia-southeast1.firebasedatabase.app",
-    projectId: "YOUR_PROJECT",
-    storageBucket: "YOUR_PROJECT.appspot.com",
-    messagingSenderId: "YOUR_SENDER_ID",
-    appId: "YOUR_APP_ID"
-  },
+    apiKey: "AIzaSyDn5vnWHXJrEFjFEzPW9oeK4_WJCu5nrH8",
+  authDomain: "pokestair.firebaseapp.com",
+  databaseURL: "https://pokestair-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "pokestair",
+  storageBucket: "pokestair.firebasestorage.app",
+  messagingSenderId: "978944147870",
+  appId: "1:978944147870:web:bb6552814038dfec6a568f"
+};
 
   // 관리자 로그인 창에 미리 채워 둘 이메일 (편의용).
   // ⚠ 권한은 이 문자열이 아니라 DB의 stairRace/admins/{UID} = true 로만 결정됩니다.
-  adminEmail: "admin@stair-race.local",
+  adminEmail: "pokepack1010@gmail.com",
 
   // DB 최상위 경로. database.rules.json 안의 "stairRace"와 반드시 같아야 합니다.
   dbRoot: "stairRace",
