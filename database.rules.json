@@ -1,0 +1,98 @@
+{
+  "rules": {
+    "stairRace": {
+      "admins": {
+        ".read": "auth != null",
+        ".write": false
+      },
+      "game": {
+        "current": {
+          ".read": "auth != null",
+          ".write": "auth != null && root.child('stairRace/admins').child(auth.uid).val() === true",
+          ".validate": "newData.hasChildren(['status']) && (newData.child('status').val() === 'lobby' || newData.child('status').val() === 'ended' || (newData.child('status').val() === 'running' && newData.hasChildren(['gid','seed','startedAt','countdownMs','durationMs','idleMs']) && newData.child('gid').isString() && newData.child('seed').isNumber() && newData.child('seed').val() >= 1 && newData.child('seed').val() <= 999999 && newData.child('seed').val() % 1 === 0 && newData.child('countdownMs').val() >= 0 && newData.child('countdownMs').val() <= 10000 && newData.child('durationMs').val() >= 10000 && newData.child('durationMs').val() <= 600000 && newData.child('idleMs').val() >= 3000 && newData.child('idleMs').val() <= 120000 && ((newData.child('gid').val() === data.child('gid').val() && newData.child('startedAt').val() === data.child('startedAt').val() && newData.child('seed').val() === data.child('seed').val()) || newData.child('startedAt').val() === now)))"
+        },
+        "slots": {
+          ".read": "auth != null",
+          "$slot": {
+            ".write": "auth != null && ((!data.exists() && newData.val() === auth.uid && newData.parent().parent().child('players').child(auth.uid).child('slot').val() === $slot) || (data.exists() && !newData.exists() && (data.val() === auth.uid || root.child('stairRace/admins').child(auth.uid).val() === true || !newData.parent().parent().child('players').child(data.val()).exists())))",
+            ".validate": "$slot.matches(/^([0-9]|1[0-9])$/) && newData.isString()"
+          }
+        },
+        "players": {
+          ".read": "auth != null",
+          "$uid": {
+            ".write": "auth != null && (auth.uid === $uid || root.child('stairRace/admins').child(auth.uid).val() === true) && (newData.exists() || newData.parent().parent().child('slots').child(data.child('slot').val()).val() !== $uid)",
+            ".validate": "newData.hasChildren(['name','ch','slot','joinedAt']) && newData.parent().parent().child('slots').child(newData.child('slot').val()).val() === $uid && (data.exists() ? (newData.child('slot').val() === data.child('slot').val() && newData.child('joinedAt').val() === data.child('joinedAt').val()) : newData.child('joinedAt').val() === now)",
+            "name": {
+              ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 12"
+            },
+            "ch": {
+              ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 20"
+            },
+            "slot": {
+              ".validate": "newData.isString()"
+            },
+            "joinedAt": {
+              ".validate": "newData.isNumber()"
+            },
+            "on": {
+              ".validate": "newData.isBoolean()"
+            },
+            "seen": {
+              ".validate": "newData.isNumber()"
+            },
+            "ready": {
+              ".validate": "newData.isBoolean()"
+            },
+            "$other": {
+              ".validate": false
+            }
+          }
+        },
+        "runs": {
+          ".read": "auth != null",
+          "$gid": {
+            ".write": "auth != null && root.child('stairRace/admins').child(auth.uid).val() === true && !newData.exists()",
+            "$uid": {
+              ".write": "auth != null && auth.uid === $uid && newData.exists() && root.child('stairRace/game/current').child('gid').val() === $gid && root.child('stairRace/game/current').child('status').val() === 'running' && now < ((root.child('stairRace/game/current').child('startedAt').val() + root.child('stairRace/game/current').child('countdownMs').val()) + root.child('stairRace/game/current').child('durationMs').val())",
+              ".validate": "newData.hasChildren(['s','d','t','a','n','c']) && ((!data.exists() && newData.child('s').val() === 0 && newData.child('d').val() === 'R' && newData.child('a').val() === true && newData.child('t').val() === now && root.child('stairRace/game/players').child($uid).child('joinedAt').exists() && root.child('stairRace/game/players').child($uid).child('joinedAt').val() < root.child('stairRace/game/current').child('startedAt').val()) || (data.exists() && data.child('a').val() === true && newData.child('a').val() === true && newData.child('n').val() === data.child('n').val() && newData.child('c').val() === data.child('c').val() && newData.child('s').val() === data.child('s').val() + 1 && newData.child('t').val() === now && now >= (root.child('stairRace/game/current').child('startedAt').val() + root.child('stairRace/game/current').child('countdownMs').val()) && now - data.child('t').val() >= 40 && now - (data.child('t').val() > (root.child('stairRace/game/current').child('startedAt').val() + root.child('stairRace/game/current').child('countdownMs').val()) ? data.child('t').val() : (root.child('stairRace/game/current').child('startedAt').val() + root.child('stairRace/game/current').child('countdownMs').val())) <= root.child('stairRace/game/current').child('idleMs').val() && newData.child('d').val() === ((((newData.child('s').val() * newData.child('s').val() * 7919) + (newData.child('s').val() * root.child('stairRace/game/current').child('seed').val()) + (root.child('stairRace/game/current').child('seed').val() * 31)) % 10007) % 3 === 0 ? (data.child('d').val() === 'L' ? 'R' : 'L') : data.child('d').val())) || (data.exists() && data.child('a').val() === true && newData.child('a').val() === false && newData.child('s').val() === data.child('s').val() && newData.child('d').val() === data.child('d').val() && newData.child('t').val() === data.child('t').val() && newData.child('n').val() === data.child('n').val() && newData.child('c').val() === data.child('c').val()))",
+              "s": {
+                ".validate": "newData.isNumber()"
+              },
+              "d": {
+                ".validate": "newData.val() === 'L' || newData.val() === 'R'"
+              },
+              "t": {
+                ".validate": "newData.isNumber()"
+              },
+              "a": {
+                ".validate": "newData.isBoolean()"
+              },
+              "n": {
+                ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 12"
+              },
+              "c": {
+                ".validate": "newData.isString() && newData.val().length <= 20"
+              },
+              "$other": {
+                ".validate": false
+              }
+            }
+          }
+        },
+        "history": {
+          ".read": "auth != null",
+          "$gid": {
+            ".write": "auth != null && root.child('stairRace/admins').child(auth.uid).val() === true && !data.exists() && newData.exists()"
+          }
+        }
+      },
+      "playerStats": {
+        ".read": "auth != null",
+        "$uid": {
+          ".write": "auth != null && root.child('stairRace/admins').child(auth.uid).val() === true && newData.exists() && newData.child('lastGid').isString() && newData.child('lastGid').val() !== data.child('lastGid').val() && !root.child('stairRace/game/history').child(newData.child('lastGid').val()).exists() && newData.parent().parent().child('game/history').child(newData.child('lastGid').val()).exists()"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#7cc8ff">
+  <title>포켓몬 계단 레이스</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Jua&family=Noto+Sans+KR:wght@400;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- ===================== 시작 화면 ===================== -->
+  <section id="screen-start" class="screen">
+    <div class="panel start-panel">
+      <div class="logo">
+        <span class="logo-top">포켓몬</span>
+        <span class="logo-main">계단 레이스</span>
+      </div>
+      <p class="tagline">모두 같은 계단을 동시에 오릅니다. 방향을 틀리면 추락!</p>
+
+      <label class="field">
+        <span class="label">닉네임</span>
+        <input id="inp-name" type="text" maxlength="12" autocomplete="off" placeholder="최대 12자">
+      </label>
+
+      <div class="field">
+        <span class="label">캐릭터 선택 <em id="char-name"></em></span>
+        <div id="char-grid" class="char-grid"></div>
+      </div>
+
+      <button id="btn-join" class="btn primary big" type="button">참가하기</button>
+      <div class="btn-row">
+        <button id="btn-records" class="btn soft" type="button">개인 기록</button>
+        <button id="btn-admin-open" class="btn soft" type="button">관리자</button>
+      </div>
+      <p id="start-msg" class="msg"></p>
+      <p class="conn-line"><span class="conn-dot" id="start-conn"></span><span id="start-conn-text">연결 준비 중</span></p>
+    </div>
+  </section>
+
+  <!-- ===================== 대기실 ===================== -->
+  <section id="screen-lobby" class="screen">
+    <div class="panel lobby-panel">
+      <header class="lobby-head">
+        <div>
+          <h2>대기실</h2>
+          <p id="lobby-status" class="muted"></p>
+        </div>
+        <div class="count"><b id="lobby-count">0</b><span>/ <i id="lobby-max">20</i>명</span></div>
+      </header>
+      <p class="conn-line"><span class="conn-dot" id="lobby-conn"></span><span id="lobby-conn-text"></span></p>
+
+      <ul id="lobby-list" class="lobby-list"></ul>
+
+      <div class="me-box">
+        <span class="label">내 캐릭터</span>
+        <div id="lobby-char-grid" class="char-grid small"></div>
+        <div class="btn-row">
+          <button id="btn-ready" class="btn primary" type="button">준비 완료</button>
+          <button id="btn-records2" class="btn soft" type="button">개인 기록</button>
+          <button id="btn-leave" class="btn soft" type="button">나가기</button>
+        </div>
+      </div>
+
+      <div class="admin-panel admin-only">
+        <span class="label">관리자 메뉴</span>
+        <div class="admin-grid">
+          <label>경기 시간
+            <select id="adm-duration">
+              <option value="60">60초</option>
+              <option value="120">120초</option>
+              <option value="180" selected>180초</option>
+              <option value="300">300초</option>
+            </select>
+          </label>
+          <label>무입력 탈락
+            <select id="adm-idle">
+              <option value="5">5초 (긴장감)</option>
+              <option value="10">10초</option>
+              <option value="30">30초</option>
+              <option value="60" selected>60초 (재접속 여유)</option>
+            </select>
+          </label>
+        </div>
+        <div class="btn-row">
+          <button id="btn-start" class="btn primary big" type="button">게임 시작</button>
+          <button id="btn-cleanup" class="btn soft" type="button">오프라인 참가자 정리</button>
+        </div>
+        <p class="muted small-note">관리자도 시작 후 다른 참가자와 같은 규칙으로 함께 플레이합니다.</p>
+        <p id="admin-msg" class="msg"></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== 게임 화면 ===================== -->
+  <section id="screen-game" class="screen">
+    <div id="stage">
+      <canvas id="cv"></canvas>
+
+      <div class="hud">
+        <div class="hud-box"><span class="hud-label">계단</span><b id="hud-steps">0</b></div>
+        <div class="hud-box"><span class="hud-label">남은 시간</span><b id="hud-time">3:00</b></div>
+        <div class="hud-box"><span class="hud-label">순위</span><b id="hud-rank">-</b></div>
+        <span class="conn-dot" id="hud-conn" title="연결 상태"></span>
+      </div>
+      <div id="idle-wrap" class="idle-wrap" hidden><div id="idle-bar"></div><span>무입력 탈락까지</span></div>
+
+      <aside id="rank-panel" class="rank-panel">
+        <button id="rank-toggle" class="rank-toggle" type="button">
+          <span>실시간 순위</span><span id="rank-summary"></span>
+        </button>
+        <div id="rank-list" class="rank-list"></div>
+      </aside>
+
+      <div id="countdown" class="countdown"></div>
+      <div id="banner" class="banner" hidden></div>
+      <button id="btn-force-end" class="btn danger small admin-only force-end" type="button">강제 종료</button>
+
+      <div class="controls">
+        <button id="btn-left" class="ctl" type="button" aria-label="왼쪽으로 오르기">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 4 7 12l8 8" /></svg>
+          <span>왼쪽</span>
+        </button>
+        <button id="btn-right" class="ctl" type="button" aria-label="오른쪽으로 오르기">
+          <span>오른쪽</span>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 4 8 8-8 8" /></svg>
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== 결과 화면 ===================== -->
+  <section id="screen-result" class="screen">
+    <div class="panel result-panel">
+      <h2>경기 결과</h2>
+      <div id="result-winner" class="winner"></div>
+      <div id="result-me" class="result-me"></div>
+      <ol id="result-list" class="result-list"></ol>
+      <div class="btn-row">
+        <button id="btn-back-lobby" class="btn primary" type="button">대기실로</button>
+        <button id="btn-records3" class="btn soft" type="button">개인 기록</button>
+      </div>
+      <div class="admin-panel admin-only">
+        <span class="label">관리자 메뉴</span>
+        <p id="result-admin-msg" class="msg"></p>
+        <div class="btn-row">
+          <button id="btn-save-result" class="btn soft" type="button">결과 다시 저장</button>
+          <button id="btn-next-round" class="btn primary" type="button">다음 경기 준비</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== 모달 ===================== -->
+  <div id="modal-records" class="modal" hidden>
+    <div class="modal-card">
+      <button class="modal-x" type="button" data-close>닫기</button>
+      <h3>개인 기록</h3>
+      <div id="records-body"></div>
+    </div>
+  </div>
+
+  <div id="modal-admin" class="modal" hidden>
+    <div class="modal-card">
+      <button class="modal-x" type="button" data-close>닫기</button>
+      <h3>관리자</h3>
+      <form id="admin-form">
+        <label class="field"><span class="label">이메일</span>
+          <input id="adm-email" type="email" autocomplete="username"></label>
+        <label class="field"><span class="label">비밀번호</span>
+          <input id="adm-pw" type="password" autocomplete="current-password"></label>
+        <button class="btn primary" type="submit">관리자 로그인</button>
+      </form>
+      <div id="admin-status" class="admin-status"></div>
+      <button id="btn-admin-logout" class="btn soft" type="button" hidden>관리자 로그아웃</button>
+      <p id="admin-login-msg" class="msg"></p>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+</div>
+
+<script type="module" src="game.js"></script>
+</body>
+</html>
