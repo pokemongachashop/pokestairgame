@@ -98,7 +98,7 @@ let app, auth, db;
 const configured = !String(CONFIG.firebase?.apiKey || "").startsWith("YOUR_");
 
 const S = {
-  uid: null, user: null, isAdmin: false, admins: {},
+  uid: null, user: null, isAdmin: false, admins: {}, adminsErr: null, adminsLoaded: false,
   offset: 0, connected: false,
   current: null, players: {}, runs: {}, runsGid: null, runsLoaded: false,
   course: null,
@@ -117,13 +117,42 @@ const S = {
 const now = () => Date.now() + S.offset;
 
 /* ---------------- 게임 시간 / 단계 ---------------- */
+// 전원 탈락 시: 3초 카운트다운 → "경기 종료" 안내 → 결과 공개
+const FINISH_COUNT_MS = 3000, FINISH_MSG_MS = 1800;
+
+// 모든 참가자가 탈락했으면 마지막 탈락 시각(서버 시각)을, 아니면 null
+// 추락은 f(추락 서버 시각), 무입력 탈락은 마지막 이동 + 무입력 시간으로 계산 → 모든 화면에서 같은 값
+function allDeadAt(c, go) {
+  if (!S.runsLoaded || !c || c.status !== "running") return null;
+  const ids = Object.keys(S.runs || {}); if (!ids.length) return null;
+  const idle = c.idleMs || 60000, n = now(); let last = go;
+  for (const id of ids) {
+    const r = S.runs[id];
+    const d = r.a ? Math.max(r.t || 0, go) + idle : (typeof r.f === "number" ? r.f : Math.max(r.t || 0, go));
+    if (r.a && d >= n) return null; // 아직 살아 있는 사람이 있음
+    last = Math.max(last, d);
+  }
+  return last;
+}
 function gameTimes() {
   const c = S.current;
   if (!c || typeof c.startedAt !== "number") return null;
+  const pn = performance.now();
+  if (S._gt && S._gt.c === c && S._gt.r === S.runs && pn - S._gt.at < 15) return S._gt.v;
   const go = c.startedAt + (c.countdownMs || 0);
-  let end = go + (c.durationMs || 0);
-  if (c.status === "ended" && typeof c.endedAt === "number") end = Math.min(end, Math.max(c.endedAt, c.startedAt));
-  return { go, end };
+  const rawEnd = go + (c.durationMs || 0);
+  let v;
+  if (c.status === "ended" && typeof c.endedAt === "number") {
+    const e = Math.min(rawEnd, Math.max(c.endedAt, c.startedAt));
+    v = { go, end: e, playEnd: e, allDead: null };
+  } else {
+    const ad = allDeadAt(c, go);
+    v = (ad !== null && ad < rawEnd)
+      ? { go, end: Math.min(rawEnd, ad + FINISH_COUNT_MS + FINISH_MSG_MS), playEnd: ad, allDead: ad }
+      : { go, end: rawEnd, playEnd: rawEnd, allDead: null };
+  }
+  S._gt = { c, r: S.runs, at: pn, v };
+  return v;
 }
 function phase() {
   const c = S.current;
@@ -132,6 +161,7 @@ function phase() {
   const n = now();
   if (c.status === "ended" || n >= t.end) return "ended";
   if (n < t.go) return "countdown";
+  if (t.allDead !== null) return "finishing";
   return "running";
 }
 // 규칙과 동일한 생존 판정: 추락(a=false)했거나, 마지막 이동 후 무입력 시간이 초과되면 탈락
@@ -153,6 +183,8 @@ function computeRanking() {
    부팅 / 인증
 ============================================================= */
 function boot() {
+  if (window.__stairBooted) return; // 같은 페이지에서 게임이 두 번 실행되는 것 방지
+  window.__stairBooted = true;
   $("inp-name").value = S.myName;
   buildCharGrid($("char-grid"), true);
   buildCharGrid($("lobby-char-grid"), false);
@@ -172,9 +204,16 @@ function boot() {
     renderConn();
     return;
   }
-  app = initializeApp(CONFIG.firebase);
-  auth = getAuth(app);
-  db = getDatabase(app);
+  try {
+    app = initializeApp(CONFIG.firebase);
+    auth = getAuth(app);
+    db = getDatabase(app);
+  } catch (e) {
+    console.error(e);
+    setMsg("start-msg", "Firebase 초기화 실패: config.js의 firebase 값(특히 databaseURL)을 확인하세요. — " + (e.message || e));
+    $("btn-join").disabled = true;
+    return;
+  }
   onAuthStateChanged(auth, (user) => {
     if (!user) {
       signInAnonymously(auth).catch((e) => {
@@ -196,7 +235,7 @@ function setUser(user) {
   S.unsubs.forEach((u) => u()); S.unsubs = [];
   if (S.unsubRuns) { S.unsubRuns(); S.unsubRuns = null; }
   Object.assign(S, {
-    uid: user.uid, user, isAdmin: false, admins: {}, players: {}, runs: {}, runsGid: null, runsLoaded: false,
+    uid: user.uid, user, isAdmin: false, admins: {}, adminsErr: null, adminsLoaded: false, players: {}, runs: {}, runsGid: null, runsLoaded: false,
     presenceSet: false, creatingRun: false, finalResult: null, follow: null
   });
   S.ents.clear(); resetLocal();
@@ -213,12 +252,17 @@ function subscribeBase() {
     if (S.connected && !was) S.presenceSet = false; // 재연결 시에만 접속 표시 다시 등록
     ensurePresence(); renderConn();
   });
-  sub(PATH.admins, (s) => {
+  S.unsubs.push(onValue(ref(db, PATH.admins), (s) => {
+    S.adminsErr = null; S.adminsLoaded = true;
     S.admins = s.val() || {};
     S.isAdmin = S.admins[S.uid] === true;
     document.body.classList.toggle("is-admin", S.isAdmin);
     renderAdminModal(); renderLobby();
-  });
+  }, (err) => {
+    console.warn("admins", err.message);
+    S.adminsErr = err.message || String(err); S.adminsLoaded = true;
+    renderAdminModal();
+  }));
   sub(PATH.current, (s) => { S.current = s.val(); onCurrentChanged(); });
   sub(PATH.players, (s) => { S.players = s.val() || {}; ensurePresence(); route(); renderLobby(); });
 }
@@ -376,7 +420,7 @@ function doFall(reason, wrongDir) {
   if (navigator.vibrate) { try { navigator.vibrate(120); } catch { /* 무시 */ } }
   toast(reason === "idle" ? "입력이 없어 탈락했어요" : "방향을 틀려 추락했어요!");
   S.local.pending++;
-  update(runRef(), { a: false })
+  update(runRef(), { a: false, f: serverTimestamp() })
     .catch((e2) => console.warn("추락 기록 실패", e2.message))
     .finally(() => { S.local.pending--; if (S.local.pending === 0) onRunsChanged(); });
 }
@@ -393,7 +437,7 @@ function checkIdle() {
 async function adminStart() {
   if (!S.isAdmin) return;
   const c = S.current, ph = phase();
-  if (ph === "countdown" || ph === "running") return setMsg("admin-msg", "이미 경기가 진행 중입니다.");
+  if (ph === "countdown" || ph === "running" || ph === "finishing") return setMsg("admin-msg", "이미 경기가 진행 중입니다.");
   if (c && c.gid && c.finalizedGid !== c.gid && Object.keys(S.runs).length &&
     !confirm("이전 경기 결과가 아직 저장되지 않았습니다. 저장하지 않고 새 경기를 시작할까요?")) return;
   const n = Object.keys(S.players).length;
@@ -406,7 +450,7 @@ async function adminStart() {
       countdownMs: Math.round(GC.countdownSeconds * 1000),
       durationMs: (+$("adm-duration").value || 180) * 1000,
       idleMs: (+$("adm-idle").value || 60) * 1000,
-      endedAt: null, finalizedGid: null
+      endedAt: null, finalizedGid: null, endReason: null
     });
     setMsg("admin-msg", "");
   } catch (e) {
@@ -434,19 +478,21 @@ async function adminFinalize(manual = false) {
     const upd = {
       "game/current/status": "ended",
       "game/current/finalizedGid": c.gid,
+      "game/current/endReason": t.allDead !== null ? "allDead" : (typeof c.endedAt === "number" && c.endedAt < t.go + c.durationMs ? "forced" : "time"),
       [`game/history/${c.gid}`]: {
-        startedAt: c.startedAt, go: t.go, endedAt: t.end, durationMs: c.durationMs,
+        startedAt: c.startedAt, go: t.go, endedAt: t.playEnd, durationMs: c.durationMs,
+        endReason: t.allDead !== null ? "allDead" : (typeof c.endedAt === "number" && c.endedAt < t.go + c.durationMs ? "forced" : "time"),
         playerCount: rows.length,
         winnerUid: rows[0] ? rows[0].uid : null, winnerName: rows[0] ? rows[0].name : null,
         finalLeaderboard: rows.map((r) => ({ uid: r.uid, name: r.name, ch: r.ch, steps: r.steps, alive: r.alive, rank: r.rank }))
       }
     };
-    if (typeof c.endedAt !== "number") upd["game/current/endedAt"] = t.end;
+    if (typeof c.endedAt !== "number") upd["game/current/endedAt"] = t.playEnd;
     rows.forEach((r) => {
       const o = stats[r.uid] || {};
       const gp = (o.gamesPlayed || 0) + 1;
       const tot = (o.totalSteps || 0) + r.steps;
-      const recent = [{ gid: c.gid, steps: r.steps, rank: r.rank, players: rows.length, alive: r.alive, at: t.end }]
+      const recent = [{ gid: c.gid, steps: r.steps, rank: r.rank, players: rows.length, alive: r.alive, at: t.playEnd }]
         .concat(Array.isArray(o.recent) ? o.recent : []).slice(0, 5);
       upd[`playerStats/${r.uid}`] = {
         nickname: r.name, gamesPlayed: gp,
@@ -617,7 +663,9 @@ function renderLobby() {
 function updateHud(ph) {
   if (S.screen !== "game") return;
   const t = gameTimes(); const n = now();
-  const remain = !t ? 0 : ph === "countdown" ? t.end - t.go : ph === "running" ? t.end - n : 0;
+  const remain = !t ? 0 : ph === "countdown" ? t.end - t.go : ph === "running" ? t.end - n
+    : ph === "finishing" ? (t.go + (S.current.durationMs || 0)) - t.allDead : 0; // 전원 탈락 시점의 남은 시간에서 멈춤
+  $("stage").classList.toggle("finishing", ph === "finishing");
   $("hud-time").textContent = fmtTime(remain);
   const followUid = cameraUid();
   const myRun = S.runs[S.uid];
@@ -627,6 +675,11 @@ function updateHud(ph) {
   // 카운트다운
   const cd = $("countdown");
   if (ph === "countdown" && t) { cd.textContent = Math.ceil((t.go - n) / 1000); cd.classList.remove("small"); }
+  else if (ph === "finishing" && t) {
+    const left = t.allDead + FINISH_COUNT_MS - n;
+    if (left > 0) { cd.textContent = Math.ceil(left / 1000); cd.classList.remove("small"); }
+    else { cd.textContent = "경기 종료!"; cd.classList.add("small"); }
+  }
   else if (performance.now() < S.goFlashUntil) { cd.textContent = "출발!"; cd.classList.add("small"); }
   else cd.textContent = "";
 
@@ -641,7 +694,11 @@ function updateHud(ph) {
 
   // 안내 배너
   const bn = $("banner"); let msg = "";
-  if (!myRun && (ph === "countdown" || ph === "running")) {
+  if (ph === "finishing" && t) {
+    msg = (t.allDead + FINISH_COUNT_MS - n > 0)
+      ? "모든 참가자가 탈락했습니다. 잠시 후 경기를 종료합니다."
+      : "경기를 종료합니다. 최종 순위를 공개합니다!";
+  } else if (!myRun && (ph === "countdown" || ph === "running")) {
     msg = S.players[S.uid] && S.current && S.players[S.uid].joinedAt >= S.current.startedAt
       ? "경기 시작 후 입장해 관전 중입니다. 순위표를 눌러 다른 참가자를 볼 수 있어요."
       : "경기에 입장하는 중…";
@@ -697,7 +754,7 @@ function captureFinal() {
   if (S.finalResult && S.finalResult.gid === c.gid && S.finalResult.locked) return;
   const t = gameTimes();
   if (Object.keys(S.runs).length) {
-    S.finalResult = { gid: c.gid, rows: computeRanking(), durationSec: Math.round((t.end - t.go) / 1000), locked };
+    S.finalResult = { gid: c.gid, rows: computeRanking(), durationSec: Math.round((t.playEnd - t.go) / 1000), locked, allDead: t.allDead !== null || c.endReason === "allDead" };
     if (S.screen === "result") renderResult();
     return;
   }
@@ -706,7 +763,7 @@ function captureFinal() {
   get(ref(db, `${PATH.history}/${c.gid}`)).then((s) => {
     const h = s.val();
     S.finalResult = h
-      ? { gid: c.gid, rows: h.finalLeaderboard || [], durationSec: Math.round((h.endedAt - (h.go || h.startedAt)) / 1000), locked: true }
+      ? { gid: c.gid, rows: h.finalLeaderboard || [], durationSec: Math.round((h.endedAt - (h.go || h.startedAt)) / 1000), locked: true, allDead: h.endReason === "allDead" }
       : { gid: c.gid, rows: [], durationSec: 0, locked: true };
     if (S.screen === "result") renderResult();
   }).catch(() => { S.histFetching = null; });
@@ -721,16 +778,25 @@ function renderResult() {
     return;
   }
   const rows = fr.rows || [];
+  const sig = JSON.stringify([fr.gid, fr.durationSec, rows.map((r) => [r.uid, r.steps, r.alive, r.rank])]);
+  if (S.resultSig === sig) return; // 내용이 같으면 다시 그리지 않음 (애니메이션 유지)
+  S.resultSig = sig;
+  const reveal = S.revealedGid !== fr.gid; S.revealedGid = fr.gid;
+  const step = rows.length ? Math.min(160, 2400 / rows.length) : 0; // 꼴찌부터 1위 순서로 공개
   const w = rows[0];
-  $("result-winner").innerHTML = w
-    ? `<small>1위 · 경기 시간 ${fr.durationSec}초</small>${esc(w.name)} · ${w.steps}계단`
-    : `<small>결과 · 경기 시간 ${fr.durationSec}초</small>참가 기록이 없습니다`;
+  const why = fr.allDead ? "전원 탈락 · " : "";
+  const wEl = $("result-winner");
+  wEl.innerHTML = w
+    ? `<small>1위 · ${why}경기 시간 ${fr.durationSec}초</small>${esc(w.name)} · ${w.steps}계단`
+    : `<small>결과 · ${why}경기 시간 ${fr.durationSec}초</small>참가 기록이 없습니다`;
+  wEl.classList.toggle("reveal", reveal);
+  wEl.style.animationDelay = reveal ? `${Math.round(rows.length * step + 200)}ms` : "";
   const me = rows.find((r) => r.uid === S.uid);
   $("result-me").innerHTML = me
     ? `<div>내 순위<b>${me.rank}위</b></div><div>최종 계단<b>${me.steps}</b></div><div>내 상태<b>${me.alive ? "생존" : "탈락"}</b></div>`
     : `<div>내 순위<b>-</b></div><div>최종 계단<b>-</b></div><div>내 상태<b>관전</b></div>`;
   $("result-list").innerHTML = rows.map((r) =>
-    `<li class="${r.uid === S.uid ? "me" : ""}"><span class="rk">${r.rank}</span>` +
+    `<li class="${r.uid === S.uid ? "me" : ""}${reveal ? " reveal" : ""}" style="${reveal ? `animation-delay:${Math.round((rows.length - r.rank) * step)}ms` : ""}"><span class="rk">${r.rank}</span>` +
     `<span class="dot" style="width:12px;height:12px;border-radius:50%;background:${charById(r.ch).body}"></span>` +
     `<span class="nm">${esc(r.name)}</span><span class="badge ${r.alive ? "ready" : ""}">${r.alive ? "생존" : "탈락"}</span>` +
     `<span class="st">${r.steps}</span></li>`).join("");
@@ -764,15 +830,34 @@ async function openRecords() {
   } catch (e) { body.textContent = "기록을 불러오지 못했습니다."; }
 }
 
+function adminDiagnosis(uid) {
+  const path = `${ROOT}/admins/${uid}`;
+  if (!S.adminsLoaded) return "관리자 목록을 확인하는 중…";
+  if (S.adminsErr) return `<b>보안 규칙 때문에 관리자 목록을 읽지 못했습니다.</b> Realtime Database → 규칙 탭에 database.rules.json 내용을 붙여넣고 <b>게시</b>했는지 확인하세요.<br><small>${esc(S.adminsErr)}</small>`;
+  const keys = Object.keys(S.admins || {});
+  if (uid in (S.admins || {})) {
+    const v = S.admins[uid];
+    return `UID는 맞게 들어가 있지만 값이 <code>${esc(JSON.stringify(v))}</code> (${typeof v})로 저장돼 있습니다. 따옴표 없는 <b>불리언 true</b>여야 합니다. 콘솔에서 값을 지우고 <code>true</code>만 입력하세요.`;
+  }
+  if (!keys.length) return `<code>${esc(ROOT)}/admins</code> 경로에서 아무것도 찾지 못했습니다. 최상위 이름이 정확히 <code>${esc(ROOT)}</code>(대소문자 구분)인지, 그 아래에 <code>admins</code>가 있는지, config.js의 databaseURL과 같은 데이터베이스에 넣었는지 확인하세요.<br>넣어야 할 위치: <code>${esc(path)}</code> = <code>true</code>`;
+  return `<code>${esc(ROOT)}/admins</code> 아래에 UID ${keys.length}개가 있지만 이 계정의 UID와 일치하는 것이 없습니다 (오타 가능성). 아래 [UID 복사]로 복사해서 붙여넣으세요.<br>현재 들어 있는 UID: ${keys.map((k) => `<code>${esc(k)}</code>`).join(" ")}`;
+}
+
 function renderAdminModal() {
   const u = S.user;
   const isEmail = u && !u.isAnonymous;
   $("admin-form").hidden = !!isEmail;
   $("btn-admin-logout").hidden = !isEmail;
   $("admin-status").innerHTML = !u ? "" : isEmail
-    ? `로그인: ${esc(u.email)}<br>권한: <b>${S.isAdmin ? "관리자 확인됨" : "관리자 아님"}</b><br>UID: <code>${esc(u.uid)}</code>` +
-      (S.isAdmin ? "" : `<br>DB의 <code>${esc(ROOT)}/admins/${esc(u.uid)}</code> 에 <code>true</code>를 넣어야 관리자가 됩니다.`)
+    ? `로그인: ${esc(u.email)}<br>권한: <b>${S.isAdmin ? "관리자 확인됨" : "관리자 아님"}</b><br>UID: <code>${esc(u.uid)}</code> <button type="button" class="btn soft small" id="btn-copy-uid">UID 복사</button>` +
+      (S.isAdmin ? "" : `<div class="diag">${adminDiagnosis(u.uid)}</div>`)
     : `관리자 계정으로 로그인하면 이 기기의 기존 참가 기록은 정리됩니다. 관리자도 로그인 후 다시 참가해 함께 플레이합니다.`;
+  const cb = $("btn-copy-uid");
+  if (cb) cb.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(u.uid); toast("UID를 복사했습니다"); }
+    catch { prompt("아래 UID를 길게 눌러 복사하세요", u.uid); }
+  });
+  if (isEmail && S.isAdmin) setMsg("admin-login-msg", "관리자 권한이 확인되었습니다.", true);
   $("btn-admin-open").textContent = S.isAdmin ? "관리자 메뉴" : "관리자";
 }
 
